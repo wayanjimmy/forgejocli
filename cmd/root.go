@@ -44,7 +44,10 @@ Manage repositories, issues, and pull requests from the terminal.`,
 			cfg.Owner = flagOwner
 		}
 
-		apiClient = apiclient.NewClient(cfg.Server, cfg.Token, cfg.Proxy)
+		apiClient, err = apiclient.NewClient(cfg.Server, cfg.Token, cfg.Proxy)
+		if err != nil {
+			return fmt.Errorf("creating API client: %w", err)
+		}
 		return nil
 	},
 }

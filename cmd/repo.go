@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"strconv"
 
 	"github.com/jedib0t/go-pretty/v6/table"
 	apiclient "github.com/jimboylabs/forgejocli/internal/api"
@@ -194,13 +193,4 @@ func resolveOwnerRepo(args []string) (string, string) {
 	}
 
 	return owner, repo
-}
-
-// parseInt helper
-func parseInt(s string, def int) int {
-	n, err := strconv.Atoi(s)
-	if err != nil {
-		return def
-	}
-	return n
 }

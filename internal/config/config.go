@@ -20,14 +20,24 @@ type Config struct {
 	Proxy  string
 }
 
+func configDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("cannot determine home directory: %w", err)
+	}
+	return filepath.Join(home, ".config", appName), nil
+}
+
 // Load reads config from file + env + flags
 func Load() (*Config, error) {
-	home, _ := os.UserHomeDir()
-	configDir := filepath.Join(home, ".config", "forgejo-cli")
+	dir, err := configDir()
+	if err != nil {
+		return nil, err
+	}
 
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
-	viper.AddConfigPath(configDir)
+	viper.AddConfigPath(dir)
 	viper.AddConfigPath(".")
 
 	// Env overrides
@@ -37,9 +47,6 @@ func Load() (*Config, error) {
 	viper.BindEnv("token", "FORGEJO_TOKEN")
 	viper.BindEnv("owner", "FORGEJO_OWNER")
 	viper.BindEnv("proxy", "FORGEJO_PROXY")
-
-	// Defaults
-	// viper.SetDefault("server", "http://localhost:3000")
 
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
@@ -64,12 +71,14 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
-// InitConfig creates a default config file
+// InitConfig creates a default config file with restricted permissions
 func InitConfig(server, token, owner, proxy string) error {
-	home, _ := os.UserHomeDir()
-	configDir := filepath.Join(home, ".config", "forgejo-cli")
+	dir, err := configDir()
+	if err != nil {
+		return err
+	}
 
-	if err := os.MkdirAll(configDir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("creating config dir: %w", err)
 	}
 
@@ -78,9 +87,14 @@ func InitConfig(server, token, owner, proxy string) error {
 	viper.Set("owner", owner)
 	viper.Set("proxy", proxy)
 
-	configPath := filepath.Join(configDir, "config.yaml")
+	configPath := filepath.Join(dir, "config.yaml")
 	if err := viper.WriteConfigAs(configPath); err != nil {
 		return fmt.Errorf("writing config: %w", err)
+	}
+
+	// Restrict permissions: only owner can read/write
+	if err := os.Chmod(configPath, 0600); err != nil {
+		return fmt.Errorf("setting config permissions: %w", err)
 	}
 
 	fmt.Printf("Config written to %s\n", configPath)

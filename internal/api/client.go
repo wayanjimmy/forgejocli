@@ -7,7 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
+	"strings"
 	"time"
 
 	"golang.org/x/net/proxy"
@@ -21,23 +21,24 @@ type Client struct {
 }
 
 // NewClient creates a new Forgejo API client
-func NewClient(baseURL, token, socksProxy string) *Client {
+func NewClient(baseURL, token, socksProxy string) (*Client, error) {
 	var httpClient *http.Client
 
 	if socksProxy != "" {
-		// Parse socks5://host:port
 		u, err := url.Parse(socksProxy)
-		if err == nil {
-			dialer, err := proxy.SOCKS5("tcp", u.Host, nil, proxy.Direct)
-			if err == nil {
-				transport := &http.Transport{
-					Dial: dialer.Dial,
-				}
-				httpClient = &http.Client{
-					Transport: transport,
-					Timeout:   30 * time.Second,
-				}
-			}
+		if err != nil {
+			return nil, fmt.Errorf("parsing proxy URL %q: %w", socksProxy, err)
+		}
+		dialer, err := proxy.SOCKS5("tcp", u.Host, nil, proxy.Direct)
+		if err != nil {
+			return nil, fmt.Errorf("creating SOCKS5 dialer: %w", err)
+		}
+		transport := &http.Transport{
+			Dial: dialer.Dial,
+		}
+		httpClient = &http.Client{
+			Transport: transport,
+			Timeout:   30 * time.Second,
 		}
 	}
 
@@ -46,10 +47,10 @@ func NewClient(baseURL, token, socksProxy string) *Client {
 	}
 
 	return &Client{
-		baseURL: baseURL + "/api/v1",
+		baseURL: strings.TrimSuffix(baseURL, "/") + "/api/v1",
 		token:   token,
 		client:  httpClient,
-	}
+	}, nil
 }
 
 func (c *Client) doRequest(method, path string, body interface{}) ([]byte, int, error) {
@@ -121,12 +122,12 @@ func (c *Client) patch(path string, body interface{}) ([]byte, error) {
 }
 
 func (c *Client) delete(path string) error {
-	_, status, err := c.doRequest("DELETE", path, nil)
+	data, status, err := c.doRequest("DELETE", path, nil)
 	if err != nil {
 		return err
 	}
 	if status >= 400 {
-		return fmt.Errorf("API %d", status)
+		return fmt.Errorf("API %d: %s", status, string(data))
 	}
 	return nil
 }
@@ -426,12 +427,3 @@ func (c *Client) ReopenPR(owner, repo string, index int) (*PullRequest, error) {
 
 // helper for string pointer
 func strPtr(s string) *string { return &s }
-
-// helper for int parsing
-func parseInt(s string, def int) int {
-	n, err := strconv.Atoi(s)
-	if err != nil {
-		return def
-	}
-	return n
-}
