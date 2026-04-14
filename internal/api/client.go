@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -423,6 +426,77 @@ func (c *Client) ReopenPR(owner, repo string, index int) (*PullRequest, error) {
 		return nil, fmt.Errorf("parsing reopened PR: %w", err)
 	}
 	return &pr, nil
+}
+
+// ---- Attachments API ----
+
+type Attachment struct {
+	ID            int       `json:"id"`
+	Name          string    `json:"name"`
+	Size          int64     `json:"size"`
+	DownloadCount int       `json:"download_count"`
+	Created       time.Time `json:"created_at"`
+	UUID          string    `json:"uuid"`
+	BrowserURL    string    `json:"browser_download_url"`
+}
+
+// UploadIssueAsset uploads a file as an attachment to an issue/PR.
+// Returns the attachment with download URL.
+func (c *Client) UploadIssueAsset(owner, repo string, index int, filePath string) (*Attachment, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("opening file %s: %w", filePath, err)
+	}
+	defer file.Close()
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+
+	part, err := writer.CreateFormFile("attachment", filepath.Base(filePath))
+	if err != nil {
+		return nil, fmt.Errorf("creating multipart form: %w", err)
+	}
+
+	if _, err := io.Copy(part, file); err != nil {
+		return nil, fmt.Errorf("copying file content: %w", err)
+	}
+
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("closing multipart writer: %w", err)
+	}
+
+	apiURL := fmt.Sprintf("%s/repos/%s/%s/issues/%d/assets?name=%s",
+		c.baseURL, owner, repo, index, url.QueryEscape(filepath.Base(filePath)))
+
+	req, err := http.NewRequest("POST", apiURL, &body)
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "token "+c.token)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("upload request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("API %d: %s", resp.StatusCode, string(respData))
+	}
+
+	var att Attachment
+	if err := json.Unmarshal(respData, &att); err != nil {
+		return nil, fmt.Errorf("parsing attachment response: %w", err)
+	}
+
+	return &att, nil
 }
 
 // helper for string pointer

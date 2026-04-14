@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/jedib0t/go-pretty/v6/table"
 	apiclient "github.com/jimboylabs/forgejocli/internal/api"
@@ -16,6 +18,7 @@ var (
 	prHead      string
 	prBase      string
 	prMergeMsg  string
+	prAttach    []string
 )
 
 var prCmd = &cobra.Command{
@@ -140,8 +143,9 @@ var prViewCmd = &cobra.Command{
 
 var prCreateCmd = &cobra.Command{
 	Use:   "create",
-	Short: "Create a pull request",
-	Example: `  forgejo pr create --repo myproject --title "New feature" --body "Adds X" --head feature-branch --base main`,
+	Short: "Create a pull request with optional image attachments",
+	Example: `  forgejo pr create -r myproject -t "New feature" -b "Adds X" --head feature-branch --base main
+  forgejo pr create -r myproject -t "UI fix" --attach ./screenshot.png --head fix/ui --base main`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		owner, repo := resolveOwnerRepo(nil)
 		if repo == "" {
@@ -157,14 +161,68 @@ var prCreateCmd = &cobra.Command{
 			prBase = "main"
 		}
 
+		// Validate attachment files
+		for _, f := range prAttach {
+			if _, err := os.Stat(f); os.IsNotExist(err) {
+				return fmt.Errorf("attachment file not found: %s", f)
+			}
+		}
+
+		// Build body with image placeholders
+		body := prBody
+		var imagePlaceholders []string
+		for _, f := range prAttach {
+			placeholder := fmt.Sprintf("![%s](upload-placeholder:%s)", f, f)
+			imagePlaceholders = append(imagePlaceholders, placeholder)
+		}
+		if len(imagePlaceholders) > 0 {
+			if body != "" {
+				body += "\n\n"
+			}
+			body += strings.Join(imagePlaceholders, "\n")
+		}
+
 		pr, err := apiClient.CreatePR(owner, repo, apiclient.CreatePROption{
 			Title: prTitle,
-			Body:  prBody,
+			Body:  body,
 			Head:  prHead,
 			Base:  prBase,
 		})
 		if err != nil {
 			return err
+		}
+
+		// Upload attachments and update body
+		if len(prAttach) > 0 {
+			var imageRefs []string
+			for _, f := range prAttach {
+				att, err := apiClient.UploadIssueAsset(owner, repo, pr.Number, f)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "warning: failed to upload %s: %v\n", f, err)
+					imageRefs = append(imageRefs, fmt.Sprintf("![%s](upload-failed)", f))
+					continue
+				}
+				imageRefs = append(imageRefs, fmt.Sprintf("![%s](%s)", f, att.BrowserURL))
+			}
+
+			// Replace placeholders with real URLs
+			newBody := pr.Body
+			for i, placeholder := range imagePlaceholders {
+				if i < len(imageRefs) {
+					newBody = strings.Replace(newBody, placeholder, imageRefs[i], 1)
+				}
+			}
+
+			// Update PR body with final URLs
+			// Note: PRs use the issue edit endpoint for body updates
+			_, err := apiClient.EditIssue(owner, repo, pr.Number, apiclient.EditIssueOption{
+				Body: &newBody,
+			})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to update PR body: %v\n", err)
+			} else {
+				pr.Body = newBody
+			}
 		}
 
 		if isJSON() {
@@ -175,6 +233,9 @@ var prCreateCmd = &cobra.Command{
 		fmt.Printf("title:   %s\n", pr.Title)
 		fmt.Printf("head:    %s\n", prHead)
 		fmt.Printf("base:    %s\n", prBase)
+		if len(prAttach) > 0 {
+			fmt.Printf("attachments: %d file(s) uploaded\n", len(prAttach))
+		}
 		fmt.Printf("url:     %s\n", pr.HTMLURL)
 		return nil
 	},
@@ -272,6 +333,7 @@ func init() {
 	prCreateCmd.Flags().StringVarP(&prBody, "body", "b", "", "PR body")
 	prCreateCmd.Flags().StringVar(&prHead, "head", "", "head branch (source)")
 	prCreateCmd.Flags().StringVar(&prBase, "base", "main", "base branch (target)")
+	prCreateCmd.Flags().StringArrayVar(&prAttach, "attach", nil, "attach image file (can be used multiple times)")
 
 	prMergeCmd.Flags().StringVarP(&prMergeMsg, "message", "m", "", "merge commit message")
 

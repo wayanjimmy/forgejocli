@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/jedib0t/go-pretty/v6/table"
@@ -14,6 +15,7 @@ var (
 	issueListLimit int
 	issueTitle     string
 	issueBody      string
+	issueAttach    []string
 )
 
 var issueCmd = &cobra.Command{
@@ -132,9 +134,10 @@ var issueViewCmd = &cobra.Command{
 
 var issueCreateCmd = &cobra.Command{
 	Use:   "create",
-	Short: "Create a new issue",
-	Example: `  forgejo issue create --repo myproject --title "Bug fix" --body "Description"
-  forgejo issue create -r myproject -t "Quick bug" -b "Something broke"`,
+	Short: "Create a new issue with optional image attachments",
+	Example: `  forgejo issue create -r myproject -t "Bug fix" -b "Description"
+  forgejo issue create -r myproject -t "Screenshot bug" --attach ./screenshot.png
+  forgejo issue create -r myproject -t "Multi image" --attach ./img1.png --attach ./img2.png`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		owner, repo := resolveOwnerRepo(nil)
 		if repo == "" {
@@ -144,12 +147,65 @@ var issueCreateCmd = &cobra.Command{
 			return fmt.Errorf("title is required (use --title)")
 		}
 
+		// Validate attachment files exist before creating the issue
+		for _, f := range issueAttach {
+			if _, err := os.Stat(f); os.IsNotExist(err) {
+				return fmt.Errorf("attachment file not found: %s", f)
+			}
+		}
+
+		// Build body with image references (placeholders, replaced after upload)
+		body := issueBody
+		var imagePlaceholders []string
+		for _, f := range issueAttach {
+			placeholder := fmt.Sprintf("![%s](upload-placeholder:%s)", f, f)
+			imagePlaceholders = append(imagePlaceholders, placeholder)
+		}
+		if len(imagePlaceholders) > 0 {
+			if body != "" {
+				body += "\n\n"
+			}
+			body += strings.Join(imagePlaceholders, "\n")
+		}
+
 		issue, err := apiClient.CreateIssue(owner, repo, apiclient.CreateIssueOption{
 			Title: issueTitle,
-			Body:  issueBody,
+			Body:  body,
 		})
 		if err != nil {
 			return err
+		}
+
+		// Upload attachments and update body with real URLs
+		if len(issueAttach) > 0 {
+			var imageRefs []string
+			for _, f := range issueAttach {
+				att, err := apiClient.UploadIssueAsset(owner, repo, issue.Number, f)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "warning: failed to upload %s: %v\n", f, err)
+					imageRefs = append(imageRefs, fmt.Sprintf("![%s](upload-failed)", f))
+					continue
+				}
+				imageRefs = append(imageRefs, fmt.Sprintf("![%s](%s)", f, att.BrowserURL))
+			}
+
+			// Replace placeholders with real URLs
+			newBody := issue.Body
+			for i, placeholder := range imagePlaceholders {
+				if i < len(imageRefs) {
+					newBody = strings.Replace(newBody, placeholder, imageRefs[i], 1)
+				}
+			}
+
+			// Update issue with final body
+			updated, err := apiClient.EditIssue(owner, repo, issue.Number, apiclient.EditIssueOption{
+				Body: &newBody,
+			})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to update issue body: %v\n", err)
+			} else {
+				issue = updated
+			}
 		}
 
 		if isJSON() {
@@ -158,6 +214,9 @@ var issueCreateCmd = &cobra.Command{
 
 		fmt.Printf("created: issue #%d\n", issue.Number)
 		fmt.Printf("title:   %s\n", issue.Title)
+		if len(issueAttach) > 0 {
+			fmt.Printf("attachments: %d file(s) uploaded\n", len(issueAttach))
+		}
 		fmt.Printf("url:     %s\n", issue.HTMLURL)
 		return nil
 	},
@@ -229,6 +288,7 @@ func init() {
 
 	issueCreateCmd.Flags().StringVarP(&issueTitle, "title", "t", "", "issue title")
 	issueCreateCmd.Flags().StringVarP(&issueBody, "body", "b", "", "issue body")
+	issueCreateCmd.Flags().StringArrayVar(&issueAttach, "attach", nil, "attach image file (can be used multiple times)")
 
 	issueCmd.AddCommand(issueListCmd)
 	issueCmd.AddCommand(issueViewCmd)
