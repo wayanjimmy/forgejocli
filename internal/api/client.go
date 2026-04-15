@@ -501,3 +501,72 @@ func (c *Client) UploadIssueAsset(owner, repo string, index int, filePath string
 
 // helper for string pointer
 func strPtr(s string) *string { return &s }
+
+// ---- Actions API ----
+
+type ActionRun struct {
+	ID           int                    `json:"id"`
+	Title        string                 `json:"title"`
+	Status       string                 `json:"status"`
+	Event        string                 `json:"event"`
+	CommitSHA    string                 `json:"commit_sha"`
+	PrettyRef    string                 `json:"prettyref"`
+	HTMLURL      string                 `json:"html_url"`
+	WorkflowID   string                 `json:"workflow_id"`
+	IndexInRepo  int                    `json:"index_in_repo"`
+	TriggerUser  *ActionUser            `json:"trigger_user"`
+	TriggerEvent string                 `json:"trigger_event"`
+	Created      time.Time              `json:"created"`
+	Started      time.Time              `json:"started"`
+	Stopped      time.Time              `json:"stopped"`
+	Updated      time.Time              `json:"updated"`
+	Duration     int64                  `json:"duration"`
+	Repository   *ActionRunRepository   `json:"repository"`
+}
+
+type ActionRunRepository struct {
+	ID       int    `json:"id"`
+	Name     string `json:"name"`
+	FullName string `json:"full_name"`
+}
+
+type ActionUser struct {
+	ID       int    `json:"id"`
+	Login    string `json:"login"`
+	FullName string `json:"full_name"`
+}
+
+type ListActionRunsResponse struct {
+	TotalCount   int         `json:"total_count"`
+	WorkflowRuns []ActionRun `json:"workflow_runs"`
+}
+
+func (c *Client) ListActionRuns(owner, repo string, page, limit int, status string) (*ListActionRunsResponse, error) {
+	path := fmt.Sprintf("/repos/%s/%s/actions/runs?limit=%d&page=%d",
+		url.PathEscape(owner), url.PathEscape(repo), limit, page)
+	if status != "" {
+		path += "&status=" + url.QueryEscape(status)
+	}
+	data, err := c.get(path)
+	if err != nil {
+		return nil, err
+	}
+	var result ListActionRunsResponse
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("parsing action runs: %w", err)
+	}
+	return &result, nil
+}
+
+func (c *Client) GetActionRun(owner, repo string, runID int) (*ActionRun, error) {
+	data, err := c.get(fmt.Sprintf("/repos/%s/%s/actions/runs/%d",
+		url.PathEscape(owner), url.PathEscape(repo), runID))
+	if err != nil {
+		return nil, err
+	}
+	var run ActionRun
+	if err := json.Unmarshal(data, &run); err != nil {
+		return nil, fmt.Errorf("parsing action run: %w", err)
+	}
+	return &run, nil
+}
