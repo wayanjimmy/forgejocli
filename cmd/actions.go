@@ -15,8 +15,17 @@ var (
 )
 
 var actionsCmd = &cobra.Command{
-	Use:     "actions",
-	Short:   "Manage Forgejo Actions (CI/CD)",
+	Use:   "actions",
+	Short: "Manage Forgejo Actions (CI/CD)",
+	Long: `Manage Forgejo Actions (CI/CD).
+
+Available commands:
+  list    - List action runs
+  view    - View run details
+  logs    - Get logs URL for a run (opens browser)
+
+NOTE: Forgejo does not expose action logs via the REST API. Use the 'logs'
+command to get the web UI URL and open it in your browser.`,
 	Aliases: []string{"act", "ci"},
 }
 
@@ -87,16 +96,12 @@ var actionsListCmd = &cobra.Command{
 var actionsViewCmd = &cobra.Command{
 	Use:   "view <run_id>",
 	Short: "View details of an action run",
-	Args:  cobra.MaximumNArgs(1),
-	Example: "  forgejo actions view -r builder 12\n  forgejo actions view -r builder 12 -O json",
+	Args:  cobra.ExactArgs(1),
+	Example: "  forgejo actions view -r builder 12\n  forgejo actions view -r builder 12 -O json\n  forgejo actions logs 12 -r builder --open",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		owner, repo := resolveOwnerRepo(nil)
 		if repo == "" {
 			return fmt.Errorf("repository name is required (use --repo)")
-		}
-
-		if len(args) == 0 {
-			return fmt.Errorf("run ID is required (pass as argument)")
 		}
 
 		runID := parseInt(args[0], 0)
@@ -160,6 +165,9 @@ var actionsViewCmd = &cobra.Command{
 		if !run.Stopped.IsZero() {
 			fmt.Printf("stopped:       %s\n", run.Stopped.Format("2006-01-02 15:04:05"))
 		}
+
+		fmt.Println()
+		fmt.Printf("💡 To view logs, use: forgejo actions logs %d -r %s --open\n", run.IndexInRepo, repo)
 
 		return nil
 	},
