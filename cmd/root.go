@@ -21,7 +21,7 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "forgejo",
+	Use:   "forgejo-cli",
 	Short: "CLI for self-hosted Forgejo",
 	Long: `A command-line tool to interact with your self-hosted Forgejo server.
 Manage repositories, issues, and pull requests from the terminal.`,
