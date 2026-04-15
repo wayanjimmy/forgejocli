@@ -114,6 +114,32 @@ forgejo-cli pr close 1 -r repo-name
 forgejo-cli pr reopen 1 -r repo-name
 ```
 
+### Forgejo Actions (CI/CD)
+
+Manage CI/CD workflow runs for a repository.
+
+```bash
+# List action runs
+# Aliases: ls, runs, act, ci
+forgejo-cli actions list -r repo-name
+forgejo-cli actions list -r repo-name -s success      # filter by status: success/failure/running/waiting/cancelled
+forgejo-cli actions list -r repo-name -n 10           # limit to 10 runs
+forgejo-cli actions ls -r repo-name                   # alias
+
+# View specific action run details
+# Required: run_id as argument
+forgejo-cli actions view 12 -r repo-name
+forgejo-cli actions view 12 -r repo-name -O json
+
+# Get logs URL for a run
+# Aliases: log
+# NOTE: Forgejo does not expose logs via API. This provides the web UI URL.
+forgejo-cli actions logs 11 -r repo-name              # print logs URL
+forgejo-cli actions logs 11 -r repo-name --open       # open URL in browser
+forgejo-cli actions logs 11 -r repo-name --job 0      # specify job index (default: 0)
+forgejo-cli actions logs 11 -r repo-name --attempt 1  # specify attempt number (default: 1)
+```
+
 ## Output Formats
 
 ### Text (Default)
@@ -181,6 +207,25 @@ forgejo-cli repo list -O json -n 100 | jq -r '.[].full_name' | grep "api"
 forgejo-cli repo list -O json | jq '.[] | select(.open_issues_count > 0) | .full_name'
 ```
 
+### CI/CD Monitoring Workflow
+
+```bash
+# 1. List recent action runs
+forgejo-cli actions list -r myproject -n 10
+
+# 2. Check failed runs
+forgejo-cli actions list -r myproject -s failure
+
+# 3. View details of a specific run
+forgejo-cli actions view 42 -r myproject
+
+# 4. Open logs in browser for debugging
+forgejo-cli actions logs 42 -r myproject --open
+
+# 5. View logs URL without opening browser (copy/paste)
+forgejo-cli actions logs 42 -r myproject
+```
+
 ## Required Token Scopes
 
 Based on Forgejo token scope documentation:
@@ -192,6 +237,7 @@ Based on Forgejo token scope documentation:
 | `read:issue` | List/view issues |
 | `write:issue` | Create/close/reopen issues, upload attachments |
 | `write:user` | Create repositories |
+| `read:actions` | List/view action runs and logs |
 
 ## Constraints
 
