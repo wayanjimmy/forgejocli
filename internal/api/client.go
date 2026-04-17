@@ -182,6 +182,27 @@ type Label struct {
 	Color string `json:"color"`
 }
 
+// Comment represents a comment on an issue or PR
+type Comment struct {
+	ID        int       `json:"id"`
+	HTMLURL   string    `json:"html_url"`
+	Body      string    `json:"body"`
+	User      *User     `json:"user"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// IssueWithComments wraps an issue with its comments
+type IssueWithComments struct {
+	Issue    *Issue    `json:"issue"`
+	Comments []Comment `json:"comments"`
+}
+
+// CreateCommentOption for creating comments
+type CreateCommentOption struct {
+	Body string `json:"body"`
+}
+
 type PullRequest struct {
 	ID        int       `json:"id"`
 	Number    int       `json:"number"`
@@ -346,6 +367,102 @@ func (c *Client) CloseIssue(owner, repo string, index int) (*Issue, error) {
 func (c *Client) ReopenIssue(owner, repo string, index int) (*Issue, error) {
 	state := "open"
 	return c.EditIssue(owner, repo, index, EditIssueOption{State: &state})
+}
+
+// ---- Comments API ----
+
+// fetchCommentsPage is a DRY helper for fetching a single page of comments
+func (c *Client) fetchCommentsPage(owner, repo string, index, page, limit int) ([]Comment, error) {
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d/comments?limit=%d&page=%d",
+		owner, repo, index, limit, page)
+	data, err := c.get(path)
+	if err != nil {
+		return nil, err
+	}
+	var comments []Comment
+	if err := json.Unmarshal(data, &comments); err != nil {
+		return nil, fmt.Errorf("parsing comments: %w", err)
+	}
+	return comments, nil
+}
+
+// GetIssueComments retrieves comments for an issue with optional pagination.
+// limit=0 means fetch all comments (auto-pagination).
+// Uses DRY helper function to avoid code duplication.
+func (c *Client) GetIssueComments(owner, repo string, index int, page, limit int) ([]Comment, error) {
+	// If limit is 0, use auto-pagination with default page size
+	if limit == 0 {
+		limit = 50 // Default for auto-pagination
+		var allComments []Comment
+		for p := 1; ; p++ {
+			comments, err := c.fetchCommentsPage(owner, repo, index, p, limit)
+			if err != nil {
+				return nil, err
+			}
+			allComments = append(allComments, comments...)
+			if len(comments) < limit {
+				break // Last page reached
+			}
+		}
+		return allComments, nil
+	}
+
+	// Single page request
+	return c.fetchCommentsPage(owner, repo, index, page, limit)
+}
+
+// GetIssueWithComments retrieves issue and comments with optional pagination
+// commentLimit=0 fetches all comments; >0 limits to specific count
+func (c *Client) GetIssueWithComments(owner, repo string, index int, commentLimit int) (*IssueWithComments, error) {
+	issue, err := c.GetIssue(owner, repo, index)
+	if err != nil {
+		return nil, err
+	}
+
+	// If limit specified, fetch just first page with that limit
+	// Otherwise fetch all with auto-pagination
+	page := 1
+	comments, err := c.GetIssueComments(owner, repo, index, page, commentLimit)
+	if err != nil {
+		return nil, err
+	}
+
+	return &IssueWithComments{
+		Issue:    issue,
+		Comments: comments,
+	}, nil
+}
+
+// CreateComment adds a comment to an issue
+func (c *Client) CreateComment(owner, repo string, index int, body string) (*Comment, error) {
+	opt := CreateCommentOption{Body: body}
+	data, err := c.post(fmt.Sprintf("/repos/%s/%s/issues/%d/comments", owner, repo, index), opt)
+	if err != nil {
+		return nil, err
+	}
+	var comment Comment
+	if err := json.Unmarshal(data, &comment); err != nil {
+		return nil, fmt.Errorf("parsing comment: %w", err)
+	}
+	return &comment, nil
+}
+
+// GetComment retrieves a single comment by ID
+func (c *Client) GetComment(owner, repo string, commentID int) (*Comment, error) {
+	data, err := c.get(fmt.Sprintf("/repos/%s/%s/issues/comments/%d", owner, repo, commentID))
+	if err != nil {
+		return nil, err
+	}
+	var comment Comment
+	if err := json.Unmarshal(data, &comment); err != nil {
+		return nil, fmt.Errorf("parsing comment: %w", err)
+	}
+	return &comment, nil
+}
+
+// DeleteComment removes a comment
+func (c *Client) DeleteComment(owner, repo string, commentID int) error {
+	return c.delete(fmt.Sprintf("/repos/%s/%s/issues/comments/%d", owner, repo, commentID))
 }
 
 // ---- Pull Requests API ----
